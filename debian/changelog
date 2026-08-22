@@ -1,3 +1,12 @@
+simplehf (0.2.3) unstable; urgency=medium
+
+  * Prevent panes and controls from collapsing below usable dimensions.
+  * Preserve draggable proportional dividers and horizontal file-path scrolling.
+  * Show selected byte size alongside total repository size.
+  * Make per-file progress rows adapt cleanly across supported GNOME releases.
+
+ -- openresearchtools <openresearchtools@users.noreply.github.com>  Sat, 22 Aug 2026 14:45:00 +0100
+
 simplehf (0.2.2) unstable; urgency=medium
 
   * Replace the downloader-style icon with an original SimpleHF monogram.

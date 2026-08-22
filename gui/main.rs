@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 const APP_ID: &str = "de.simplehf.SimpleHF";
 const REPOSITORY_URL: &str = "https://github.com/openresearchtools/simplehf";
+const MIN_WINDOW_WIDTH: i32 = 800;
+const MIN_WINDOW_HEIGHT: i32 = 600;
 
 fn show_about(window: &adw::ApplicationWindow) {
     let dialog = gtk::AboutDialog::builder()
@@ -136,6 +138,12 @@ impl Node {
             .map(Node::selection)
             .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
     }
+    fn selected_size(&self) -> u64 {
+        if self.file.is_some() {
+            return if self.selected { self.size } else { 0 };
+        }
+        self.children.iter().map(Node::selected_size).sum()
+    }
     fn collect(&self, output: &mut Vec<RepoFile>) {
         if let Some(file) = &self.file {
             if self.selected {
@@ -191,6 +199,7 @@ mod tests {
         root.finish();
         root.children[0].set_selected(false);
         assert_eq!(root.selection(), (1, 2));
+        assert_eq!(root.selected_size(), 1);
         let mut selected = Vec::new();
         root.collect(&mut selected);
         assert_eq!(selected[0].path, "two/b.bin");
@@ -422,6 +431,33 @@ fn send_engine_command(input: &Arc<Mutex<Option<ChildStdin>>>, command: &str) ->
         .is_some()
 }
 
+fn keep_paned_proportion(paned: &gtk::Paned, initial: f64) {
+    let proportion = Rc::new(Cell::new(initial));
+    let adjusting = Rc::new(Cell::new(false));
+    {
+        let proportion = proportion.clone();
+        let adjusting = adjusting.clone();
+        paned.connect_position_notify(move |paned| {
+            if adjusting.get() {
+                return;
+            }
+            let maximum = paned.max_position();
+            if maximum > 0 {
+                proportion.set(paned.position() as f64 / maximum as f64);
+            }
+        });
+    }
+    paned.connect_max_position_notify(move |paned| {
+        let maximum = paned.max_position();
+        if maximum <= 0 {
+            return;
+        }
+        adjusting.set(true);
+        paned.set_position((maximum as f64 * proportion.get()).round() as i32);
+        adjusting.set(false);
+    });
+}
+
 fn clear_list(list: &gtk::ListBox) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -535,7 +571,6 @@ fn render_tree(
             let name = gtk::Label::new(Some(&node.name));
             name.set_xalign(0.0);
             name.set_hexpand(true);
-            name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
             name.set_tooltip_text(Some(&node.path));
             row.append(&name);
             let size = gtk::Label::new(Some(&format_bytes(node.size as f64)));
@@ -571,7 +606,11 @@ fn render_tree(
         download.clone(),
     );
     let (selected, total) = repository.root.selection();
-    selection_label.set_text(&format!("{selected} of {total} files selected"));
+    selection_label.set_text(&format!(
+        "{selected} of {total} files selected • {} selected • {} repository",
+        format_bytes(repository.root.selected_size() as f64),
+        format_bytes(repository.root.size as f64),
+    ));
     download.set_sensitive(selected > 0);
 }
 
@@ -618,33 +657,44 @@ fn render_details(list: &gtk::ListBox, job: &Job) {
         } else {
             String::new()
         };
-        let row = adw::ActionRow::builder()
-            .title(&file.path)
-            .subtitle(format!(
-                "{} • {} / {}{}{}{}",
-                file.status,
-                format_bytes(file.downloaded as f64),
-                format_bytes(file.total as f64),
-                if file.speed > 0.0 {
-                    format!(" • {}/s", format_bytes(file.speed))
-                } else {
-                    String::new()
-                },
-                eta,
-                file.error
-                    .as_ref()
-                    .map(|e| format!(" • {e}"))
-                    .unwrap_or_default()
-            ))
-            .build();
+        let row = gtk::ListBoxRow::new();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
+        content.set_margin_top(8);
+        content.set_margin_bottom(8);
+        let title = gtk::Label::new(Some(&file.path));
+        title.set_xalign(0.0);
+        title.set_tooltip_text(Some(&file.path));
+        title.add_css_class("heading");
+        content.append(&title);
+        let subtitle = gtk::Label::new(Some(&format!(
+            "{} • {} / {}{}{}{}",
+            file.status,
+            format_bytes(file.downloaded as f64),
+            format_bytes(file.total as f64),
+            if file.speed > 0.0 {
+                format!(" • {}/s", format_bytes(file.speed))
+            } else {
+                String::new()
+            },
+            eta,
+            file.error
+                .as_ref()
+                .map(|e| format!(" • {e}"))
+                .unwrap_or_default()
+        )));
+        subtitle.set_xalign(0.0);
+        subtitle.add_css_class("dim-label");
+        content.append(&subtitle);
         let progress = gtk::ProgressBar::new();
-        progress.set_width_request(120);
         progress.set_fraction(if file.total > 0 {
             file.downloaded as f64 / file.total as f64
         } else {
             0.0
         });
-        row.add_suffix(&progress);
+        content.append(&progress);
+        row.set_child(Some(&content));
         list.append(&row);
     }
 }
@@ -666,6 +716,8 @@ fn start_download(
     box_.set_margin_bottom(8);
     let title = gtk::Label::new(Some(&repo.id));
     title.set_xalign(0.0);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    title.set_tooltip_text(Some(&repo.id));
     title.add_css_class("heading");
     let pause = gtk::Button::from_icon_name("media-playback-pause-symbolic");
     pause.add_css_class("flat");
@@ -941,6 +993,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
         .default_height(780)
         .build();
     let shell = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    shell.set_size_request(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
     let header = adw::HeaderBar::new();
     header.set_title_widget(Some(&adw::WindowTitle::new(
         "SimpleHF",
@@ -955,13 +1008,21 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     header.pack_end(&menu_button);
     shell.append(&header);
     let vertical = gtk::Paned::new(gtk::Orientation::Vertical);
-    vertical.set_position(480);
     vertical.set_vexpand(true);
+    vertical.set_wide_handle(true);
+    vertical.set_resize_start_child(true);
+    vertical.set_resize_end_child(true);
+    vertical.set_shrink_start_child(false);
+    vertical.set_shrink_end_child(false);
     shell.append(&vertical);
-    window.set_content(Some(&shell));
     let upper = gtk::Paned::new(gtk::Orientation::Horizontal);
-    upper.set_position(350);
+    upper.set_wide_handle(true);
+    upper.set_resize_start_child(true);
+    upper.set_resize_end_child(true);
+    upper.set_shrink_start_child(false);
+    upper.set_shrink_end_child(false);
     vertical.set_start_child(Some(&upper));
+
     let discovery = gtk::Box::new(gtk::Orientation::Vertical, 8);
     discovery.set_margin_start(12);
     discovery.set_margin_end(12);
@@ -992,6 +1053,9 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     let results = gtk::ListBox::new();
     results.add_css_class("boxed-list");
     let results_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .overlay_scrolling(false)
         .vexpand(true)
         .child(&results)
         .build();
@@ -1005,35 +1069,47 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     let repo_title = gtk::Label::new(Some("Open a repository"));
     repo_title.set_xalign(0.0);
     repo_title.set_hexpand(true);
+    repo_title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     repo_title.add_css_class("title-3");
     let all = gtk::Button::with_label("All");
     let none = gtk::Button::with_label("None");
     let download = gtk::Button::with_label("Add to Downloads");
     download.add_css_class("suggested-action");
     download.set_sensitive(false);
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    controls.append(&repo_title);
-    controls.append(&all);
-    controls.append(&none);
-    controls.append(&download);
-    repo_box.append(&controls);
+    repo_box.append(&repo_title);
     let selection_label = gtk::Label::new(None);
     selection_label.set_xalign(0.0);
+    selection_label.set_hexpand(true);
     selection_label.add_css_class("dim-label");
     repo_box.append(&selection_label);
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    actions.append(&all);
+    actions.append(&none);
+    actions.append(&download);
+    repo_box.append(&actions);
     let tree = gtk::ListBox::new();
     tree.set_selection_mode(gtk::SelectionMode::None);
     let tree_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .overlay_scrolling(false)
         .vexpand(true)
         .child(&tree)
         .build();
     repo_box.append(&tree_scroll);
     let lower = gtk::Paned::new(gtk::Orientation::Horizontal);
-    lower.set_position(430);
+    lower.set_wide_handle(true);
+    lower.set_resize_start_child(true);
+    lower.set_resize_end_child(true);
+    lower.set_shrink_start_child(false);
+    lower.set_shrink_end_child(false);
     vertical.set_end_child(Some(&lower));
     let jobs = gtk::ListBox::new();
     jobs.add_css_class("boxed-list");
     let jobs_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .overlay_scrolling(false)
         .vexpand(true)
         .child(&jobs)
         .build();
@@ -1041,10 +1117,19 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     let details = gtk::ListBox::new();
     details.add_css_class("boxed-list");
     let details_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .overlay_scrolling(false)
         .vexpand(true)
         .child(&details)
         .build();
     lower.set_end_child(Some(&details_scroll));
+
+    keep_paned_proportion(&vertical, 0.64);
+    keep_paned_proportion(&upper, 0.3);
+    keep_paned_proportion(&lower, 0.4);
+
+    window.set_content(Some(&shell));
 
     let load = Rc::new({
         let window = window.clone();
