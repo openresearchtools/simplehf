@@ -811,18 +811,12 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
         "Native Rust Hugging Face downloader",
     )));
     let menu = gio::Menu::new();
-    menu.append(Some("About SimpleHF"), Some("win.about"));
+    menu.append(Some("About SimpleHF"), Some("app.about"));
     let menu_button = gtk::MenuButton::new();
     menu_button.set_icon_name("open-menu-symbolic");
     menu_button.set_tooltip_text(Some("Main menu"));
     menu_button.set_menu_model(Some(&menu));
     header.pack_end(&menu_button);
-    let about = gio::SimpleAction::new("about", None);
-    {
-        let window = window.clone();
-        about.connect_activate(move |_, _| show_about(&window));
-    }
-    window.add_action(&about);
     shell.append(&header);
     let vertical = gtk::Paned::new(gtk::Orientation::Vertical);
     vertical.set_position(480);
@@ -1069,6 +1063,21 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
 
 fn main() -> glib::ExitCode {
     let app = adw::Application::builder().application_id(APP_ID).build();
+    let about = gio::SimpleAction::new("about", None);
+    let app_weak = app.downgrade();
+    about.connect_activate(move |_, _| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(window) = app
+            .active_window()
+            .and_then(|window| window.downcast::<adw::ApplicationWindow>().ok())
+        else {
+            return;
+        };
+        show_about(&window);
+    });
+    app.add_action(&about);
     app.connect_activate(|app| build_window(app).present());
     app.run()
 }
