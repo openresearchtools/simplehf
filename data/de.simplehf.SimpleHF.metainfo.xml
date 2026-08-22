@@ -15,6 +15,11 @@
   <url type="bugtracker">https://github.com/openresearchtools/simplehf/issues</url>
   <provides><binary>simplehf</binary></provides>
   <releases>
+    <release version="0.2.4" date="2026-08-22">
+      <description>
+        <p>Complete large downloads without a redundant checksum pass, keep progress lists stable, and validate partial-download resume state.</p>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-08-22">
       <description>
         <p>Improve adaptive pane sizing, preserve horizontal scrolling for long paths, and display selected and repository sizes.</p>

@@ -7,7 +7,6 @@
 use futures_util::StreamExt;
 use reqwest::{header, Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader};
 use std::path::{Component, Path, PathBuf};
@@ -35,7 +34,6 @@ struct Manifest {
 struct ManifestFile {
     path: String,
     size: Option<u64>,
-    sha256: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -183,11 +181,25 @@ async fn probe(client: &Client, url: &str, hinted: Option<u64>) -> Result<(u64, 
     Ok((total, ranged))
 }
 
-fn read_completed(path: &Path) -> BTreeSet<ByteRange> {
-    std::fs::read(path)
+fn read_completed(partial: &Path, path: &Path, total: u64) -> BTreeSet<ByteRange> {
+    let partial_matches = partial
+        .metadata()
+        .map(|metadata| metadata.len() == total)
+        .unwrap_or(false);
+    let completed: Option<BTreeSet<ByteRange>> = std::fs::read(path)
         .ok()
-        .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default()
+        .and_then(|data| serde_json::from_slice(&data).ok());
+    let planned: BTreeSet<_> = chunk_ranges(total).into_iter().collect();
+    if partial_matches
+        && completed
+            .as_ref()
+            .map(|ranges| ranges.iter().all(|range| planned.contains(range)))
+            .unwrap_or(false)
+    {
+        return completed.unwrap();
+    }
+    let _ = std::fs::remove_file(path);
+    BTreeSet::new()
 }
 
 fn write_completed(path: &Path, ranges: &BTreeSet<ByteRange>) -> Result<(), String> {
@@ -195,13 +207,6 @@ fn write_completed(path: &Path, ranges: &BTreeSet<ByteRange>) -> Result<(), Stri
     std::fs::write(&temp, serde_json::to_vec(ranges).unwrap())
         .map_err(|error| error.to_string())?;
     std::fs::rename(temp, path).map_err(|error| error.to_string())
-}
-
-fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
-    let mut digest = Sha256::new();
-    std::io::copy(&mut file, &mut digest).map_err(|error| error.to_string())?;
-    Ok(format!("{:x}", digest.finalize()))
 }
 
 async fn fetch_range(
@@ -368,15 +373,6 @@ async fn download_file(
         .metadata()
         .map(|meta| meta.len() == total)
         .unwrap_or(false)
-        && item
-            .sha256
-            .as_ref()
-            .map(|expected| {
-                sha256_file(&final_path)
-                    .map(|actual| actual == *expected)
-                    .unwrap_or(false)
-            })
-            .unwrap_or(true)
     {
         emit(Event::File {
             index,
@@ -400,7 +396,7 @@ async fn download_file(
         last_emit: Mutex::new(Instant::now()),
     });
     if ranged {
-        let completed = Arc::new(Mutex::new(read_completed(&ranges_path)));
+        let completed = Arc::new(Mutex::new(read_completed(&partial, &ranges_path, total)));
         let already = completed
             .lock()
             .unwrap()
@@ -495,13 +491,6 @@ async fn download_file(
         return Err(format!(
             "size mismatch: expected {total}, received {actual}"
         ));
-    }
-    if let Some(expected) = &item.sha256 {
-        let actual = sha256_file(&partial)?;
-        if actual != *expected {
-            let _ = tokio::fs::remove_file(&ranges_path).await;
-            return Err(format!("SHA-256 mismatch for {}", item.path));
-        }
     }
     tokio::fs::rename(&partial, &final_path)
         .await
@@ -685,6 +674,42 @@ mod tests {
                 .sum::<u64>(),
             size
         );
+    }
+
+    #[test]
+    fn resume_requires_matching_partial_and_current_ranges() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("simplehf-resume-{}-{unique}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let partial = directory.join("model.part");
+        let ranges_path = directory.join("model.part.ranges");
+        let total = 1024;
+        let planned: BTreeSet<_> = chunk_ranges(total).into_iter().collect();
+
+        std::fs::File::create(&partial)
+            .unwrap()
+            .set_len(total)
+            .unwrap();
+        write_completed(&ranges_path, &planned).unwrap();
+        assert_eq!(read_completed(&partial, &ranges_path, total), planned);
+
+        std::fs::remove_file(&partial).unwrap();
+        assert!(read_completed(&partial, &ranges_path, total).is_empty());
+        assert!(!ranges_path.exists());
+
+        std::fs::File::create(&partial)
+            .unwrap()
+            .set_len(total)
+            .unwrap();
+        let stale = BTreeSet::from([ByteRange { start: 1, end: 2 }]);
+        write_completed(&ranges_path, &stale).unwrap();
+        assert!(read_completed(&partial, &ranges_path, total).is_empty());
+        assert!(!ranges_path.exists());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

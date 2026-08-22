@@ -1,6 +1,6 @@
 [package]
 name = "simplehf-engine"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 description = "Download engine for the SimpleHF GTK application"
@@ -21,6 +21,5 @@ libadwaita = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 urlencoding = "2"

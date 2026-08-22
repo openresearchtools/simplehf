@@ -52,7 +52,6 @@ fn show_about(window: &adw::ApplicationWindow) {
 struct RepoFile {
     path: String,
     size: Option<u64>,
-    sha256: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -164,7 +163,6 @@ mod tests {
         RepoFile {
             path: path.into(),
             size: Some(size),
-            sha256: None,
         }
     }
 
@@ -211,6 +209,25 @@ mod tests {
         assert_eq!(format_duration(125.0), "2m 5s");
         assert_eq!(format_duration(7380.0), "2h 3m");
     }
+
+    #[test]
+    fn completed_job_cannot_leave_file_downloading() {
+        let mut files = vec![FileProgress {
+            path: "model.bin".into(),
+            status: "downloading".into(),
+            downloaded: 99,
+            total: 100,
+            speed: 10.0,
+            error: Some("stale".into()),
+            last_bytes: 99,
+            last_update: Instant::now(),
+        }];
+        reconcile_completed_job(&mut files);
+        assert_eq!(files[0].status, "complete");
+        assert_eq!(files[0].downloaded, 100);
+        assert_eq!(files[0].speed, 0.0);
+        assert!(files[0].error.is_none());
+    }
 }
 
 #[derive(Clone, Default)]
@@ -242,10 +259,27 @@ struct FileProgress {
 struct Job {
     status: String,
     files: Vec<FileProgress>,
+    detail_rows: Vec<FileDetailRow>,
     row_status: gtk::Label,
     row_progress: gtk::ProgressBar,
     row_pause: gtk::Button,
     row_cancel: gtk::Button,
+}
+
+#[derive(Clone)]
+struct FileDetailRow {
+    row: gtk::ListBoxRow,
+    subtitle: gtk::Label,
+    progress: gtk::ProgressBar,
+}
+
+fn reconcile_completed_job(files: &mut [FileProgress]) {
+    for file in files {
+        file.status = "complete".into();
+        file.downloaded = file.total;
+        file.speed = 0.0;
+        file.error = None;
+    }
 }
 
 #[derive(Deserialize)]
@@ -359,11 +393,6 @@ async fn load_repository(id: String, token: String) -> Result<Repository, String
             files.push(RepoFile {
                 path: path.to_string(),
                 size: entry["size"].as_u64(),
-                sha256: entry
-                    .get("lfs")
-                    .and_then(|lfs| lfs.get("oid"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
             });
         }
         for part in link.split(',') {
@@ -646,56 +675,82 @@ fn spawn_request<T: Send + 'static>(
     rx
 }
 
-fn render_details(list: &gtk::ListBox, job: &Job) {
+fn file_detail_text(file: &FileProgress) -> String {
+    let speed = if file.speed > 0.0 {
+        format!(" • {}/s", format_bytes(file.speed))
+    } else {
+        String::new()
+    };
+    let eta = if file.speed > 0.0 && file.downloaded < file.total {
+        format!(
+            " • {} remaining",
+            format_duration((file.total - file.downloaded) as f64 / file.speed)
+        )
+    } else {
+        String::new()
+    };
+    let error = file
+        .error
+        .as_ref()
+        .map(|error| format!(" • {error}"))
+        .unwrap_or_default();
+    format!(
+        "{} • {} / {}{speed}{eta}{error}",
+        file.status,
+        format_bytes(file.downloaded as f64),
+        format_bytes(file.total as f64),
+    )
+}
+
+fn build_file_detail_row(file: &FileProgress) -> FileDetailRow {
+    let row = gtk::ListBoxRow::new();
+    row.set_activatable(false);
+    row.set_selectable(false);
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(8);
+    content.set_margin_bottom(8);
+    let title = gtk::Label::new(Some(&file.path));
+    title.set_xalign(0.0);
+    title.set_tooltip_text(Some(&file.path));
+    title.add_css_class("heading");
+    content.append(&title);
+    let subtitle = gtk::Label::new(None);
+    subtitle.set_xalign(0.0);
+    subtitle.add_css_class("dim-label");
+    content.append(&subtitle);
+    let progress = gtk::ProgressBar::new();
+    content.append(&progress);
+    row.set_child(Some(&content));
+    let widgets = FileDetailRow {
+        row,
+        subtitle,
+        progress,
+    };
+    update_file_detail_row(&widgets, file);
+    widgets
+}
+
+fn update_file_detail_row(row: &FileDetailRow, file: &FileProgress) {
+    row.subtitle.set_text(&file_detail_text(file));
+    row.progress.set_fraction(if file.total > 0 {
+        file.downloaded as f64 / file.total as f64
+    } else {
+        0.0
+    });
+}
+
+fn update_file_detail_rows(job: &Job) {
+    for (row, file) in job.detail_rows.iter().zip(&job.files) {
+        update_file_detail_row(row, file);
+    }
+}
+
+fn show_file_detail_rows(list: &gtk::ListBox, job: &Job) {
     clear_list(list);
-    for file in &job.files {
-        let eta = if file.speed > 0.0 && file.downloaded < file.total {
-            format!(
-                " • {} remaining",
-                format_duration((file.total - file.downloaded) as f64 / file.speed)
-            )
-        } else {
-            String::new()
-        };
-        let row = gtk::ListBoxRow::new();
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        content.set_margin_start(12);
-        content.set_margin_end(12);
-        content.set_margin_top(8);
-        content.set_margin_bottom(8);
-        let title = gtk::Label::new(Some(&file.path));
-        title.set_xalign(0.0);
-        title.set_tooltip_text(Some(&file.path));
-        title.add_css_class("heading");
-        content.append(&title);
-        let subtitle = gtk::Label::new(Some(&format!(
-            "{} • {} / {}{}{}{}",
-            file.status,
-            format_bytes(file.downloaded as f64),
-            format_bytes(file.total as f64),
-            if file.speed > 0.0 {
-                format!(" • {}/s", format_bytes(file.speed))
-            } else {
-                String::new()
-            },
-            eta,
-            file.error
-                .as_ref()
-                .map(|e| format!(" • {e}"))
-                .unwrap_or_default()
-        )));
-        subtitle.set_xalign(0.0);
-        subtitle.add_css_class("dim-label");
-        content.append(&subtitle);
-        let progress = gtk::ProgressBar::new();
-        progress.set_fraction(if file.total > 0 {
-            file.downloaded as f64 / file.total as f64
-        } else {
-            0.0
-        });
-        content.append(&progress);
-        row.set_child(Some(&content));
-        list.append(&row);
+    for row in &job.detail_rows {
+        list.append(&row.row);
     }
 }
 
@@ -741,21 +796,24 @@ fn start_download(
     jobs_list.append(&row);
     let process: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let control_input: Arc<Mutex<Option<ChildStdin>>> = Arc::new(Mutex::new(None));
+    let file_progress: Vec<_> = files
+        .iter()
+        .map(|file| FileProgress {
+            path: file.path.clone(),
+            status: "Pending".into(),
+            downloaded: 0,
+            total: file.size.unwrap_or(0),
+            speed: 0.0,
+            error: None,
+            last_bytes: 0,
+            last_update: Instant::now(),
+        })
+        .collect();
+    let detail_rows = file_progress.iter().map(build_file_detail_row).collect();
     let job = Rc::new(RefCell::new(Job {
         status: "Queued".into(),
-        files: files
-            .iter()
-            .map(|f| FileProgress {
-                path: f.path.clone(),
-                status: "Pending".into(),
-                downloaded: 0,
-                total: f.size.unwrap_or(0),
-                speed: 0.0,
-                error: None,
-                last_bytes: 0,
-                last_update: Instant::now(),
-            })
-            .collect(),
+        files: file_progress,
+        detail_rows,
         row_status: status,
         row_progress: progress,
         row_pause: pause.clone(),
@@ -801,7 +859,7 @@ fn start_download(
     state.borrow_mut().jobs.push(job.clone());
     state.borrow_mut().current_job = Some(index);
     jobs_list.select_row(Some(&row));
-    render_details(&details, &job.borrow());
+    show_file_detail_rows(&details, &job.borrow());
     let (tx, rx) = mpsc::channel::<EngineEvent>();
     let process_for_worker = process.clone();
     let input_for_worker = control_input.clone();
@@ -893,6 +951,9 @@ fn start_download(
             match event {
                 EngineEvent::Job { status, error } => {
                     job.status = status.clone();
+                    if status == "complete" {
+                        reconcile_completed_job(&mut job.files);
+                    }
                     for file in &mut job.files {
                         if status == "paused" && file.status == "downloading" {
                             file.status = "paused".into();
@@ -968,7 +1029,7 @@ fn start_download(
             }
         }
         if changed {
-            render_details(&details, &job.borrow());
+            update_file_detail_rows(&job.borrow());
         }
         if matches!(
             job.borrow().status.as_str(),
@@ -1116,6 +1177,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
     lower.set_start_child(Some(&jobs_scroll));
     let details = gtk::ListBox::new();
     details.add_css_class("boxed-list");
+    details.set_selection_mode(gtk::SelectionMode::None);
     let details_scroll = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vscrollbar_policy(gtk::PolicyType::Automatic)
@@ -1274,7 +1336,7 @@ fn build_window(app: &adw::Application) -> adw::ApplicationWindow {
                 let index = row.index() as usize;
                 state.borrow_mut().current_job = Some(index);
                 if let Some(job) = state.borrow().jobs.get(index) {
-                    render_details(&details, &job.borrow());
+                    show_file_detail_rows(&details, &job.borrow());
                 }
             }
         });

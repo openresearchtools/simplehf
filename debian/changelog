@@ -1,3 +1,12 @@
+simplehf (0.2.4) unstable; urgency=medium
+
+  * Finish files immediately after byte-count validation and atomic rename.
+  * Remove the redundant full-file SHA-256 pass for large model files.
+  * Update persistent progress rows without flashing or resetting scroll position.
+  * Reject stale or incomplete range-resume metadata safely.
+
+ -- openresearchtools <openresearchtools@users.noreply.github.com>  Sat, 22 Aug 2026 15:15:00 +0100
+
 simplehf (0.2.3) unstable; urgency=medium
 
   * Prevent panes and controls from collapsing below usable dimensions.
