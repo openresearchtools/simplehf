@@ -35,11 +35,13 @@ jobs:
           dpkg-deb --info ../simplehf_*.deb
           dpkg-deb --contents ../simplehf_*.deb
           lintian ../simplehf_*.changes || true
+          mkdir -p dist
+          cp ../simplehf_*.deb dist/
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'workflow_dispatch' || inputs.upload_artifact
         with:
           name: simplehf-deb-${{ github.sha }}
-          path: ../simplehf_*.deb
+          path: dist/*.deb
           if-no-files-found: error
           retention-days: 14
 
