@@ -15,7 +15,8 @@ lower details pane.
 - Exact repository structure under `<chosen folder>/<organization>/<model>/`.
 - Concurrent ranged downloads across files, adaptive chunks, retry backoff,
   resumable `.part` files, and safe path validation.
-- Repository-level and per-file status, byte progress, and live speed display.
+- Pause and resume controls backed by the worker's completed-range journal.
+- Repository-level and per-file status, byte progress, live speed, and ETA.
 - Native `.deb` package, artifact-only test builds, and tagged-release GitHub Actions workflows.
 
 ## Run locally
@@ -67,3 +68,5 @@ SimpleHF is MIT licensed. The Rust engine derives its download architecture
 from Johannes Bertens' MIT-licensed `rust-hf-downloader`; attribution and the
 complete license are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
 [`licenses/`](licenses/). Rust dependency licenses are enforced in CI.
+Every resolved crate's license and notice files are also collected during the
+package build and installed under `/usr/share/doc/simplehf/cargo-licenses/`.

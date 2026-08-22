@@ -9,12 +9,13 @@ use reqwest::{header, Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::io::{BufRead, BufReader};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::Semaphore;
+use tokio::sync::{watch, Semaphore};
 
 const MIN_CHUNK: u64 = 8 * 1024 * 1024;
 const MAX_CHUNK: u64 = 128 * 1024 * 1024;
@@ -57,6 +58,44 @@ struct FileState {
     downloaded: AtomicU64,
     total: u64,
     last_emit: Mutex<Instant>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ControlState {
+    Running,
+    Paused,
+}
+
+#[derive(Clone)]
+struct Control {
+    state: watch::Sender<ControlState>,
+}
+
+impl Control {
+    fn new() -> Self {
+        let (state, _) = watch::channel(ControlState::Running);
+        Self { state }
+    }
+
+    fn set(&self, state: ControlState) {
+        self.state.send_replace(state);
+    }
+
+    async fn checkpoint(&self) {
+        let mut state = self.state.subscribe();
+        while *state.borrow_and_update() == ControlState::Paused {
+            if state.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+enum ControlCommand {
+    Pause,
+    Resume,
 }
 
 #[derive(Clone, Copy, Debug, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
@@ -172,12 +211,14 @@ async fn fetch_range(
     range: ByteRange,
     index: usize,
     state: &FileState,
+    control: &Control,
 ) -> Result<u64, String> {
     let expected = range.end - range.start + 1;
     let mut last_error = String::new();
     for attempt in 0..=RETRIES {
         let mut received = 0;
         let result = async {
+            control.checkpoint().await;
             let response = client
                 .get(url)
                 .header(
@@ -203,6 +244,7 @@ async fn fetch_range(
                 .map_err(|error| error.to_string())?;
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
+                control.checkpoint().await;
                 let chunk = chunk.map_err(|error| error.to_string())?;
                 received += chunk.len() as u64;
                 if received > expected {
@@ -248,7 +290,9 @@ async fn fetch_whole(
     partial: &Path,
     index: usize,
     state: &FileState,
+    control: &Control,
 ) -> Result<(), String> {
+    control.checkpoint().await;
     let response = client
         .get(url)
         .send()
@@ -261,6 +305,7 @@ async fn fetch_whole(
         .map_err(|error| error.to_string())?;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
+        control.checkpoint().await;
         let chunk = chunk.map_err(|error| error.to_string())?;
         output
             .write_all(&chunk)
@@ -294,6 +339,7 @@ async fn download_file(
     semaphore: Arc<Semaphore>,
     manifest: Arc<Manifest>,
     index: usize,
+    control: Control,
 ) -> Result<(), String> {
     let item = &manifest.files[index];
     let relative = safe_relative(&item.path)?;
@@ -379,7 +425,7 @@ async fn download_file(
             .collect();
         let mut tasks = Vec::new();
         for range in pending {
-            let (client, permit_pool, partial, ranges_path, completed, state, url) = (
+            let (client, permit_pool, partial, ranges_path, completed, state, url, control) = (
                 client.clone(),
                 semaphore.clone(),
                 partial.clone(),
@@ -387,13 +433,14 @@ async fn download_file(
                 completed.clone(),
                 state.clone(),
                 url.clone(),
+                control.clone(),
             );
             tasks.push(tokio::spawn(async move {
                 let _permit = permit_pool
                     .acquire()
                     .await
                     .map_err(|error| error.to_string())?;
-                fetch_range(&client, &url, &partial, range, index, &state).await?;
+                fetch_range(&client, &url, &partial, range, index, &state, &control).await?;
                 {
                     let mut done = completed.lock().unwrap();
                     done.insert(range);
@@ -425,7 +472,7 @@ async fn download_file(
         let mut last_error = None;
         for attempt in 0..=RETRIES {
             state.downloaded.store(0, Ordering::Relaxed);
-            match fetch_whole(&client, &url, &partial, index, &state).await {
+            match fetch_whole(&client, &url, &partial, index, &state, &control).await {
                 Ok(()) => {
                     last_error = None;
                     break;
@@ -472,7 +519,18 @@ async fn download_file(
 
 #[tokio::main]
 async fn main() {
-    let manifest: Manifest = match serde_json::from_reader(std::io::stdin()) {
+    let mut input = BufReader::new(std::io::stdin());
+    let mut manifest_line = String::new();
+    let manifest: Manifest = match input
+        .read_line(&mut manifest_line)
+        .map_err(|error| error.to_string())
+        .and_then(|count| {
+            if count == 0 {
+                Err("empty manifest".into())
+            } else {
+                serde_json::from_str(&manifest_line).map_err(|error| error.to_string())
+            }
+        }) {
         Ok(value) => value,
         Err(error) => {
             emit(Event::Job {
@@ -482,6 +540,31 @@ async fn main() {
             return;
         }
     };
+    let control = Control::new();
+    {
+        let control = control.clone();
+        std::thread::spawn(move || {
+            for line in input.lines().map_while(Result::ok) {
+                match serde_json::from_str::<ControlCommand>(&line) {
+                    Ok(ControlCommand::Pause) => {
+                        control.set(ControlState::Paused);
+                        emit(Event::Job {
+                            status: "paused",
+                            error: None,
+                        });
+                    }
+                    Ok(ControlCommand::Resume) => {
+                        control.set(ControlState::Running);
+                        emit(Event::Job {
+                            status: "downloading",
+                            error: None,
+                        });
+                    }
+                    Err(_) => {}
+                }
+            }
+        });
+    }
     if let Err(error) = validate_repo_id(&manifest.repo_id) {
         emit(Event::Job {
             status: "failed",
@@ -529,11 +612,16 @@ async fn main() {
     let semaphore = Arc::new(Semaphore::new(manifest.connections.clamp(1, 32)));
     let mut tasks = Vec::new();
     for index in 0..manifest.files.len() {
-        let (client, semaphore, manifest) = (client.clone(), semaphore.clone(), manifest.clone());
+        let (client, semaphore, manifest, control) = (
+            client.clone(),
+            semaphore.clone(),
+            manifest.clone(),
+            control.clone(),
+        );
         tasks.push(tokio::spawn(async move {
             (
                 index,
-                download_file(client, semaphore, manifest, index).await,
+                download_file(client, semaphore, manifest, index, control).await,
             )
         }));
     }
@@ -604,5 +692,22 @@ mod tests {
         assert!(validate_repo_id("org/model").is_ok());
         assert!(validate_repo_id("model").is_err());
         assert!(validate_repo_id("org/../model").is_err());
+    }
+
+    #[tokio::test]
+    async fn pause_blocks_work_until_resume() {
+        let control = Control::new();
+        control.set(ControlState::Paused);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), control.checkpoint())
+                .await
+                .is_err()
+        );
+        control.set(ControlState::Running);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), control.checkpoint())
+                .await
+                .is_ok()
+        );
     }
 }

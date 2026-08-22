@@ -2,6 +2,8 @@ simplehf (0.2.2) unstable; urgency=medium
 
   * Replace the downloader-style icon with an original SimpleHF monogram.
   * Add a standard About dialog with licensing, attribution, and project links.
+  * Add worker-backed pause/resume controls and per-file and whole-job ETAs.
+  * Link the inherited downloader and document installed dependency licenses.
   * Add an artifact-only GitHub build workflow for test packages.
 
  -- openresearchtools <openresearchtools@users.noreply.github.com>  Sat, 22 Aug 2026 14:00:00 +0100

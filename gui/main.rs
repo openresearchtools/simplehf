@@ -5,10 +5,10 @@ use libadwaita::prelude::*;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -32,7 +32,16 @@ fn show_about(window: &adw::ApplicationWindow) {
         .build();
     dialog.add_credit_section(
         "Third-party software",
-        &["rust-hf-downloader — Johannes Bertens (MIT)"],
+        &[
+            "rust-hf-downloader — Johannes Bertens (MIT)\nhttps://github.com/JohannesBertens/rust-hf-downloader",
+        ],
+    );
+    dialog.add_credit_section(
+        "Dependency licenses",
+        &[
+            "Complete per-crate notices: /usr/share/doc/simplehf/cargo-licenses/",
+            "SimpleHF notices: /usr/share/doc/simplehf/THIRD_PARTY_NOTICES.md",
+        ],
     );
     dialog.present();
 }
@@ -186,6 +195,13 @@ mod tests {
         root.collect(&mut selected);
         assert_eq!(selected[0].path, "two/b.bin");
     }
+
+    #[test]
+    fn durations_are_compact_and_human_readable() {
+        assert_eq!(format_duration(9.6), "10s");
+        assert_eq!(format_duration(125.0), "2m 5s");
+        assert_eq!(format_duration(7380.0), "2h 3m");
+    }
 }
 
 #[derive(Clone, Default)]
@@ -219,6 +235,8 @@ struct Job {
     files: Vec<FileProgress>,
     row_status: gtk::Label,
     row_progress: gtk::ProgressBar,
+    row_pause: gtk::Button,
+    row_cancel: gtk::Button,
 }
 
 #[derive(Deserialize)]
@@ -374,6 +392,34 @@ fn format_bytes(value: f64) -> String {
         amount /= 1024.0;
     }
     unreachable!()
+}
+
+fn format_duration(seconds: f64) -> String {
+    let seconds = seconds.max(0.0).round() as u64;
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let seconds = seconds % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+fn send_engine_command(input: &Arc<Mutex<Option<ChildStdin>>>, command: &str) -> bool {
+    input
+        .lock()
+        .ok()
+        .and_then(|mut input| {
+            let input = input.as_mut()?;
+            serde_json::to_writer(&mut *input, &serde_json::json!({"command": command})).ok()?;
+            input.write_all(b"\n").ok()?;
+            input.flush().ok()?;
+            Some(())
+        })
+        .is_some()
 }
 
 fn clear_list(list: &gtk::ListBox) {
@@ -564,10 +610,18 @@ fn spawn_request<T: Send + 'static>(
 fn render_details(list: &gtk::ListBox, job: &Job) {
     clear_list(list);
     for file in &job.files {
+        let eta = if file.speed > 0.0 && file.downloaded < file.total {
+            format!(
+                " • {} remaining",
+                format_duration((file.total - file.downloaded) as f64 / file.speed)
+            )
+        } else {
+            String::new()
+        };
         let row = adw::ActionRow::builder()
             .title(&file.path)
             .subtitle(format!(
-                "{} • {} / {}{}{}",
+                "{} • {} / {}{}{}{}",
                 file.status,
                 format_bytes(file.downloaded as f64),
                 format_bytes(file.total as f64),
@@ -576,6 +630,7 @@ fn render_details(list: &gtk::ListBox, job: &Job) {
                 } else {
                     String::new()
                 },
+                eta,
                 file.error
                     .as_ref()
                     .map(|e| format!(" • {e}"))
@@ -612,12 +667,16 @@ fn start_download(
     let title = gtk::Label::new(Some(&repo.id));
     title.set_xalign(0.0);
     title.add_css_class("heading");
+    let pause = gtk::Button::from_icon_name("media-playback-pause-symbolic");
+    pause.add_css_class("flat");
+    pause.set_tooltip_text(Some("Pause download"));
     let cancel = gtk::Button::from_icon_name("process-stop-symbolic");
     cancel.add_css_class("flat");
     cancel.set_tooltip_text(Some("Cancel download"));
     let title_line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     title.set_hexpand(true);
     title_line.append(&title);
+    title_line.append(&pause);
     title_line.append(&cancel);
     let status = gtk::Label::new(Some("Queued"));
     status.set_xalign(0.0);
@@ -629,6 +688,7 @@ fn start_download(
     row.set_child(Some(&box_));
     jobs_list.append(&row);
     let process: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let control_input: Arc<Mutex<Option<ChildStdin>>> = Arc::new(Mutex::new(None));
     let job = Rc::new(RefCell::new(Job {
         status: "Queued".into(),
         files: files
@@ -646,7 +706,29 @@ fn start_download(
             .collect(),
         row_status: status,
         row_progress: progress,
+        row_pause: pause.clone(),
+        row_cancel: cancel.clone(),
     }));
+    {
+        let input = control_input.clone();
+        let paused = Rc::new(Cell::new(false));
+        pause.connect_clicked(move |button| {
+            let next = !paused.get();
+            if send_engine_command(&input, if next { "pause" } else { "resume" }) {
+                paused.set(next);
+                button.set_icon_name(if next {
+                    "media-playback-start-symbolic"
+                } else {
+                    "media-playback-pause-symbolic"
+                });
+                button.set_tooltip_text(Some(if next {
+                    "Resume download"
+                } else {
+                    "Pause download"
+                }));
+            }
+        });
+    }
     {
         let process = process.clone();
         cancel.connect_clicked(move |button| {
@@ -670,6 +752,7 @@ fn start_download(
     render_details(&details, &job.borrow());
     let (tx, rx) = mpsc::channel::<EngineEvent>();
     let process_for_worker = process.clone();
+    let input_for_worker = control_input.clone();
     std::thread::spawn(move || {
         let engine = std::env::var("SIMPLEHF_ENGINE")
             .map(PathBuf::from)
@@ -713,7 +796,11 @@ fn start_download(
         let manifest = serde_json::json!({"repo_id": repo.id, "destination": destination, "connections": 8, "files": files});
         if let Some(mut stdin) = child.stdin.take() {
             let _ = serde_json::to_writer(&mut stdin, &manifest);
+            let _ = stdin.write_all(b"\n");
             let _ = stdin.flush();
+            if let Ok(mut input) = input_for_worker.lock() {
+                *input = Some(stdin);
+            }
         }
         let stdout = child.stdout.take();
         if let Ok(mut slot) = process_for_worker.lock() {
@@ -729,11 +816,21 @@ fn start_download(
                 }
             }
         }
+        let mut cancelled = false;
         if let Ok(mut slot) = process_for_worker.lock() {
             if let Some(child) = slot.as_mut() {
-                let _ = child.wait();
+                cancelled = child.wait().map(|status| !status.success()).unwrap_or(true);
             }
             *slot = None;
+        }
+        if let Ok(mut input) = input_for_worker.lock() {
+            *input = None;
+        }
+        if cancelled {
+            let _ = tx.send(EngineEvent::Job {
+                status: "cancelled".into(),
+                error: None,
+            });
         }
     });
     glib::timeout_add_local(Duration::from_millis(100), move || {
@@ -744,6 +841,16 @@ fn start_download(
             match event {
                 EngineEvent::Job { status, error } => {
                     job.status = status.clone();
+                    for file in &mut job.files {
+                        if status == "paused" && file.status == "downloading" {
+                            file.status = "paused".into();
+                            file.speed = 0.0;
+                        } else if status == "downloading" && file.status == "paused" {
+                            file.status = "downloading".into();
+                            file.last_bytes = file.downloaded;
+                            file.last_update = Instant::now();
+                        }
+                    }
                     job.row_status.set_text(&format!(
                         "{}{}",
                         status,
@@ -776,11 +883,37 @@ fn start_download(
             }
             let downloaded: u64 = job.files.iter().map(|f| f.downloaded).sum();
             let total: u64 = job.files.iter().map(|f| f.total).sum();
+            let speed: f64 = job.files.iter().map(|f| f.speed).sum();
             job.row_progress.set_fraction(if total > 0 {
                 downloaded as f64 / total as f64
             } else {
                 0.0
             });
+            if matches!(job.status.as_str(), "Queued" | "downloading" | "paused") {
+                let label = match job.status.as_str() {
+                    "downloading" => "Downloading",
+                    "paused" => "Paused",
+                    _ => "Queued",
+                };
+                let throughput = if speed > 0.0 {
+                    format!(" • {}/s", format_bytes(speed))
+                } else {
+                    String::new()
+                };
+                let eta = if speed > 0.0 && downloaded < total {
+                    format!(
+                        " • {} remaining",
+                        format_duration((total - downloaded) as f64 / speed)
+                    )
+                } else {
+                    String::new()
+                };
+                job.row_status.set_text(&format!(
+                    "{label} • {} / {}{throughput}{eta}",
+                    format_bytes(downloaded as f64),
+                    format_bytes(total as f64),
+                ));
+            }
         }
         if changed {
             render_details(&details, &job.borrow());
@@ -789,6 +922,9 @@ fn start_download(
             job.borrow().status.as_str(),
             "complete" | "failed" | "cancelled"
         ) {
+            let job = job.borrow();
+            job.row_pause.set_sensitive(false);
+            job.row_cancel.set_sensitive(false);
             glib::ControlFlow::Break
         } else {
             glib::ControlFlow::Continue
