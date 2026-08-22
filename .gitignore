@@ -1,0 +1,15 @@
+__pycache__/
+target/
+dist/
+*.py[cod]
+*.deb
+*.build
+*.buildinfo
+*.changes
+*.dsc
+*.tar.*
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/simplehf/

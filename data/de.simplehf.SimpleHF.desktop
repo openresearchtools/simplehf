@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=SimpleHF
+Comment=Select and download files from Hugging Face model repositories
+Exec=simplehf
+Icon=de.simplehf.SimpleHF
+Terminal=false
+Type=Application
+Categories=Network;
+Keywords=Hugging Face;models;AI;download;
+StartupNotify=true

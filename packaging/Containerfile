@@ -1,0 +1,21 @@
+FROM docker.io/library/ubuntu:22.04
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    appstream \
+    build-essential \
+    ca-certificates \
+    cargo \
+    curl \
+    debhelper \
+    libadwaita-1-dev \
+    libgtk-4-dev \
+    lintian \
+    python3 \
+    rustc \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.1
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /work

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.simplehf.SimpleHF</id>
+  <name>SimpleHF</name>
+  <summary>Select exactly which Hugging Face repository files to download</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.openresearchtools"><name>openresearchtools</name></developer>
+  <description>
+    <p>SimpleHF shows a model repository as an expandable folder tree. Select files or folders, choose a destination, and follow repository and per-file progress in a torrent-style download view.</p>
+    <p>Original names and the complete selected directory structure are preserved. Tokens may be supplied for private and gated repositories.</p>
+  </description>
+  <launchable type="desktop-id">de.simplehf.SimpleHF.desktop</launchable>
+  <url type="homepage">https://github.com/openresearchtools/simplehf</url>
+  <url type="bugtracker">https://github.com/openresearchtools/simplehf/issues</url>
+  <provides><binary>simplehf</binary></provides>
+  <releases>
+    <release version="0.2.2" date="2026-08-22">
+      <description>
+        <p>Add an original SimpleHF icon and a standard About dialog with licensing, attribution, and project links.</p>
+      </description>
+    </release>
+    <release version="0.2.1" date="2026-08-20"/>
+    <release version="0.2.0" date="2026-08-20"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

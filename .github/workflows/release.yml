@@ -1,0 +1,21 @@
+name: Release Debian package
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y cargo debhelper libgtk-4-dev libadwaita-1-dev rustc
+      - run: dpkg-buildpackage --build=binary --no-sign
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ../simplehf_*.deb
+          generate_release_notes: true

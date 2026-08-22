@@ -1,0 +1,53 @@
+name: Build Debian package
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      upload_artifact:
+        description: Upload the test package artifact
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y appstream cargo debhelper lintian libgtk-4-dev libadwaita-1-dev rustc
+      - name: Validate metadata and sources
+        run: |
+          appstreamcli validate --no-net data/de.simplehf.SimpleHF.metainfo.xml
+          cargo test --locked
+      - name: Build Debian package
+        run: dpkg-buildpackage --build=binary --no-sign
+      - name: Inspect package
+        run: |
+          dpkg-deb --info ../simplehf_*.deb
+          dpkg-deb --contents ../simplehf_*.deb
+          lintian ../simplehf_*.changes || true
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'workflow_dispatch' || inputs.upload_artifact
+        with:
+          name: simplehf-deb-${{ github.sha }}
+          path: ../simplehf_*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  licenses:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses advisories sources

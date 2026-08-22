@@ -1,0 +1,16 @@
+Source: simplehf
+Section: net
+Priority: optional
+Maintainer: openresearchtools <openresearchtools@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), cargo, rustc, python3, libgtk-4-dev, libadwaita-1-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/openresearchtools/simplehf
+Rules-Requires-Root: no
+
+Package: simplehf
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: selective Hugging Face model repository downloader
+ SimpleHF presents complete model repositories as expandable file trees and
+ lets users select individual files or whole folders. It preserves repository
+ paths and reports overall and per-file download progress.

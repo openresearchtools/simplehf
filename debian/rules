@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --locked
+	python3 scripts/collect-cargo-licenses.py
+
+override_dh_auto_test:
+	cargo test --locked
+
+override_dh_auto_install:
+	install -Dm755 target/release/simplehf-engine debian/simplehf/usr/libexec/simplehf-engine
+	install -Dm755 target/release/simplehf debian/simplehf/usr/bin/simplehf
+	install -Dm644 data/de.simplehf.SimpleHF.desktop debian/simplehf/usr/share/applications/de.simplehf.SimpleHF.desktop
+	install -Dm644 data/de.simplehf.SimpleHF.metainfo.xml debian/simplehf/usr/share/metainfo/de.simplehf.SimpleHF.metainfo.xml
+	install -Dm644 data/de.simplehf.SimpleHF.svg debian/simplehf/usr/share/icons/hicolor/scalable/apps/de.simplehf.SimpleHF.svg
+	install -Dm644 THIRD_PARTY_NOTICES.md debian/simplehf/usr/share/doc/simplehf/THIRD_PARTY_NOTICES.md
+	cp -a licenses debian/simplehf/usr/share/doc/simplehf/
+	cp -a target/third-party-licenses debian/simplehf/usr/share/doc/simplehf/cargo-licenses
+	chmod -R go-w debian/simplehf

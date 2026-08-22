@@ -1,0 +1,20 @@
+simplehf (0.2.2) unstable; urgency=medium
+
+  * Replace the downloader-style icon with an original SimpleHF monogram.
+  * Add a standard About dialog with licensing, attribution, and project links.
+  * Add an artifact-only GitHub build workflow for test packages.
+
+ -- openresearchtools <openresearchtools@users.noreply.github.com>  Sat, 22 Aug 2026 14:00:00 +0100
+
+simplehf (0.2.1) unstable; urgency=medium
+
+  * Fix Hugging Face search response decoding.
+  * Add prominent branch guides and indentation to the repository tree.
+
+ -- openresearchtools <openresearchtools@users.noreply.github.com>  Thu, 20 Aug 2026 08:55:00 +0100
+
+simplehf (0.2.0) unstable; urgency=medium
+
+  * Native Rust GTK4/libadwaita release.
+
+ -- openresearchtools <openresearchtools@users.noreply.github.com>  Thu, 20 Aug 2026 00:00:00 +0100

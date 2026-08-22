@@ -1,0 +1,26 @@
+[package]
+name = "simplehf-engine"
+version = "0.2.2"
+edition = "2021"
+license = "MIT"
+description = "Download engine for the SimpleHF GTK application"
+repository = "https://github.com/openresearchtools/simplehf"
+
+[[bin]]
+name = "simplehf-engine"
+path = "engine/main.rs"
+
+[[bin]]
+name = "simplehf"
+path = "gui/main.rs"
+
+[dependencies]
+futures-util = "0.3"
+gtk4 = "0.10"
+libadwaita = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+urlencoding = "2"
