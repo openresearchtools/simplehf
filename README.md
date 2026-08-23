@@ -2,7 +2,7 @@
 
 ![SimpleHF](SimpleHF.png)
 
-<sub>SimpleHF is not affiliated with or endorsed by the Qwen team. The model shown above is used solely to demonstrate SimpleHF's downloading capabilities.</sub>
+<sub><em>* SimpleHF is not affiliated with or endorsed by the Qwen team. The model shown above is used solely to demonstrate SimpleHF's downloading capabilities.</em></sub>
 
 SimpleHF is a native Linux app for browsing Hugging Face repositories, selecting only the files you need, and downloading them with pause/resume, progress, speed, and ETA. It preserves repository folders and supports access tokens for gated or private models.
 
