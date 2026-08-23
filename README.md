@@ -1,72 +1,23 @@
 # SimpleHF
 
-SimpleHF is a small GTK 4/libadwaita application for selectively downloading
-Hugging Face model repositories. It is designed around the familiar torrent
-client workflow: inspect the complete indented tree, select files or folders,
-add the selection to a queue, then inspect overall and per-file progress in a
-lower details pane.
+![SimpleHF](SimpleHF.png)
 
-## Features
+SimpleHF is a native Linux app for browsing Hugging Face repositories, selecting only the files you need, and downloading them with pause/resume, progress, speed, and ETA. It preserves repository folders and supports access tokens for gated or private models.
 
-- Search Hugging Face models or open `organization/model` directly.
-- In-memory Hugging Face token support for private and gated repositories.
-- Expandable repository folder tree with file/folder checkboxes and All/None.
-- Original filenames and formats—downloads use the Hub `resolve` endpoint.
-- Exact repository structure under `<chosen folder>/<organization>/<model>/`.
-- Concurrent ranged downloads across files, adaptive chunks, retry backoff,
-  resumable `.part` files, and safe path validation.
-- Pause and resume controls backed by the worker's completed-range journal.
-- Repository-level and per-file status, byte progress, live speed, and ETA.
-- Native `.deb` package, artifact-only test builds, and tagged-release GitHub Actions workflows.
+## Install on Debian 13+ or Ubuntu 24.04/26.04+
 
-## Run locally
-
-SimpleHF is native Rust. Building requires GTK 4 and libadwaita development
-headers; running requires only their normal shared-library packages:
+For the first Open Research Tools installation on a system, copy and run this command:
 
 ```sh
-sudo apt install cargo rustc libgtk-4-dev libadwaita-1-dev
-cargo run --bin simplehf
+wget -qO /tmp/keyring.deb https://keyring.openresearchtools.com && sudo apt install -y /tmp/keyring.deb && sudo apt update && sudo apt install -y simplehf
 ```
 
-## Build the Debian package
+If the Open Research Tools APT repository is already configured:
 
 ```sh
-sudo apt install debhelper cargo rustc libgtk-4-dev libadwaita-1-dev
-dpkg-buildpackage --build=binary --no-sign
+sudo apt install simplehf
 ```
 
-The package is written to the parent directory. GitHub Actions builds the same
-artifact for every push and pull request and attaches it to `v*` releases.
-Manual test builds can optionally upload the package as a 14-day workflow
-artifact without creating a tag or GitHub release.
+## Credits
 
-For a no-root local build on a machine that already has Cargo and `dpkg-deb`:
-
-```sh
-./scripts/build-deb.sh
-```
-
-This writes the installable package to `dist/`.
-
-The release build targets the Ubuntu 22.04 GTK 4.6/libadwaita 1.1 baseline.
-Newer Debian and Ubuntu releases dynamically use their own security-updated
-GTK/libadwaita libraries; old copies are not bundled into the package.
-
-## Authentication and privacy
-
-Paste a Hugging Face read token into the password field before searching or
-opening a gated/private model. The token is kept only in application memory,
-passed to the worker through its private process environment, never written to
-the manifest, configuration, logs, or command line, and disappears when the
-application exits. You must separately accept a gated repository's terms on
-Hugging Face.
-
-## Licensing
-
-SimpleHF is MIT licensed. The Rust engine derives its download architecture
-from Johannes Bertens' MIT-licensed `rust-hf-downloader`; attribution and the
-complete license are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[`licenses/`](licenses/). Rust dependency licenses are enforced in CI.
-Every resolved crate's license and notice files are also collected during the
-package build and installed under `/usr/share/doc/simplehf/cargo-licenses/`.
+SimpleHF's download architecture is derived from Johannes Bertens' MIT-licensed [rust-hf-downloader](https://github.com/JohannesBertens/rust-hf-downloader).
