@@ -2,6 +2,7 @@ simplehf (0.2.5) unstable; urgency=medium
 
   * Build native Linux ARM64 packages alongside AMD64 packages.
   * Publish both architectures together in GitHub releases.
+  * Update rustls to 0.23.45 to resolve RUSTSEC-2026-0285.
 
  -- openresearchtools <openresearchtools@users.noreply.github.com>  Tue, 22 Sep 2026 19:45:15 +0100
 

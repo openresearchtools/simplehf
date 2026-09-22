@@ -17,7 +17,7 @@
   <releases>
     <release version="0.2.5" date="2026-09-22">
       <description>
-        <p>Add native Linux ARM64 packages alongside AMD64 packages.</p>
+        <p>Add native Linux ARM64 packages alongside AMD64 packages and update the TLS dependency to fix a security advisory.</p>
       </description>
     </release>
     <release version="0.2.4" date="2026-08-22">
