@@ -1,3 +1,10 @@
+simplehf (0.2.5) unstable; urgency=medium
+
+  * Build native Linux ARM64 packages alongside AMD64 packages.
+  * Publish both architectures together in GitHub releases.
+
+ -- openresearchtools <openresearchtools@users.noreply.github.com>  Tue, 22 Sep 2026 19:45:15 +0100
+
 simplehf (0.2.4) unstable; urgency=medium
 
   * Finish files immediately after byte-count validation and atomic rename.

@@ -8,14 +8,42 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-22.04
+  build:
+    name: Build Debian package (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y cargo debhelper libgtk-4-dev libadwaita-1-dev rustc
       - run: dpkg-buildpackage --build=binary --no-sign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simplehf-deb-${{ matrix.arch }}
+          path: ../simplehf_*_${{ matrix.arch }}.deb
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: simplehf-deb-*
+          path: dist
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: ../simplehf_*.deb
+          files: dist/*.deb
+          fail_on_unmatched_files: true
           generate_release_notes: true

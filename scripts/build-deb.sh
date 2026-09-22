@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-version=${SIMPLEHF_VERSION:-0.2.2}
+version=${SIMPLEHF_VERSION:-0.2.5}
 architecture=${SIMPLEHF_ARCH:-$(dpkg --print-architecture)}
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/simplehf-package.XXXXXX")
