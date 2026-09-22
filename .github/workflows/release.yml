@@ -3,6 +3,12 @@ name: Release Debian package
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -23,13 +29,19 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ format('refs/tags/{0}', inputs.tag || github.ref_name) }}
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y cargo debhelper libgtk-4-dev libadwaita-1-dev rustc
       - run: dpkg-buildpackage --build=binary --no-sign
+      - name: Stage Debian package
+        run: |
+          mkdir -p dist
+          cp ../simplehf_*.deb dist/
       - uses: actions/upload-artifact@v4
         with:
           name: simplehf-deb-${{ matrix.arch }}
-          path: ../simplehf_*_${{ matrix.arch }}.deb
+          path: dist/simplehf_*_${{ matrix.arch }}.deb
           if-no-files-found: error
           retention-days: 1
 
@@ -44,6 +56,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: dist/*.deb
           fail_on_unmatched_files: true
           generate_release_notes: true
